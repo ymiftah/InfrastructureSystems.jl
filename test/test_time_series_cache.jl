@@ -309,3 +309,45 @@ end
     IS.get_time_series_array!(cache, initial_timestamp)
     @test_throws IS.InvalidValue IS.get_time_series_array!(cache, initial_times[3])
 end
+
+@testset "Cache row size accounts for non-isbits elements" begin
+    piecewise = IS.PiecewiseStepData([0.0, 1.0, 2.0], [10.0, 20.0])
+    @test IS._get_row_size([piecewise]) == Base.summarysize(piecewise)
+    @test IS._get_row_size([piecewise]) > sizeof(piecewise)
+    @test IS._get_row_size([1.0, 2.0]) == sizeof(1.0)
+
+    sys = IS.SystemData()
+    name = "Component1"
+    component = IS.TestComponent(name, 5)
+    IS.add_component!(sys, component)
+
+    initial_timestamp = Dates.DateTime("2020-09-01")
+    resolution = Dates.Hour(1)
+    len = 100
+    values = [
+        IS.PiecewiseStepData(
+            collect(1.0:11.0) .+ i,
+            collect(1.0:10.0) .* i,
+        ) for i in 1:len
+    ]
+    data = TimeSeries.TimeArray(
+        range(initial_timestamp; length = len, step = resolution),
+        values,
+    )
+    ts = IS.SingleTimeSeries(; data = data, name = "test")
+    IS.add_time_series!(sys, component, ts)
+
+    rows_to_cache = 5
+    cache_size_bytes = rows_to_cache * Base.summarysize(first(values))
+    cache = IS.StaticTimeSeriesCache(
+        IS.SingleTimeSeries,
+        component,
+        "test";
+        cache_size_bytes = cache_size_bytes,
+    )
+    @test 1 <= cache.in_memory_rows <= rows_to_cache
+
+    for (i, ta) in enumerate(cache)
+        @test only(TimeSeries.values(ta)) == values[i]
+    end
+end

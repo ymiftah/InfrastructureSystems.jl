@@ -466,12 +466,14 @@ end
 
 function _get_row_size(vals)
     dims = ndims(vals)
+    # sizeof is shallow for non-isbits elements, so use the deep size there.
+    measure = isbitstype(eltype(vals)) ? sizeof : Base.summarysize
     if dims == 1
-        row_size = sizeof(vals[1])
+        row_size = measure(vals[1])
     elseif dims == 2
-        row_size = sizeof(vals[1, :])
+        row_size = measure(vals[1, :])
     elseif dims == 3
-        row_size = sizeof(vals[1, :, :])
+        row_size = measure(vals[1, :, :])
     else
         error("dims=$dims is not supported")
     end
