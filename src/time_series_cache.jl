@@ -271,6 +271,7 @@ function ForecastCache(
         name;
         start_time = start_time,
         len = get_horizon_count(ts_metadata),
+        count = 1,
         resolution = resolution,
         interval = interval,
     )
