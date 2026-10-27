@@ -310,9 +310,8 @@ end
     @test_throws IS.InvalidValue IS.get_time_series_array!(cache, initial_times[3])
 end
 
-@testset "Cache row size accounts for non-isbits elements" begin
+@testset "Test cache row size with non-isbits elements" begin
     piecewise = IS.PiecewiseStepData([0.0, 1.0, 2.0], [10.0, 20.0])
-    @test IS._get_row_size([piecewise]) == Base.summarysize(piecewise)
     @test IS._get_row_size([piecewise]) > sizeof(piecewise)
     @test IS._get_row_size([1.0, 2.0]) == sizeof(1.0)
 
@@ -324,7 +323,7 @@ end
     initial_timestamp = Dates.DateTime("2020-09-01")
     resolution = Dates.Hour(1)
     len = 100
-    values = [
+    elements = [
         IS.PiecewiseStepData(
             collect(1.0:11.0) .+ i,
             collect(1.0:10.0) .* i,
@@ -332,22 +331,71 @@ end
     ]
     data = TimeSeries.TimeArray(
         range(initial_timestamp; length = len, step = resolution),
-        values,
+        elements,
     )
     ts = IS.SingleTimeSeries(; data = data, name = "test")
     IS.add_time_series!(sys, component, ts)
 
     rows_to_cache = 5
-    cache_size_bytes = rows_to_cache * Base.summarysize(first(values))
+    cache_size_bytes = rows_to_cache * Base.summarysize(first(elements))
     cache = IS.StaticTimeSeriesCache(
         IS.SingleTimeSeries,
         component,
         "test";
         cache_size_bytes = cache_size_bytes,
     )
-    @test 1 <= cache.in_memory_rows <= rows_to_cache
+    @test cache.in_memory_rows == rows_to_cache
 
     for (i, ta) in enumerate(cache)
-        @test only(TimeSeries.values(ta)) == values[i]
+        @test only(TimeSeries.values(ta)) == elements[i]
+    end
+end
+
+@testset "Test ForecastCache with non-isbits elements" begin
+    sys = IS.SystemData()
+    component = IS.TestComponent("Component1", 5)
+    IS.add_component!(sys, component)
+
+    initial_time = Dates.DateTime("2020-09-01")
+    resolution = Dates.Hour(1)
+    horizon_count = 24
+    num_forecasts = 10
+    name = "test"
+    initial_times = [initial_time + i * resolution for i in 0:(num_forecasts - 1)]
+    data = SortedDict(
+        t => [
+            IS.PiecewiseStepData(collect(1.0:11.0) .+ i, collect(1.0:10.0) .* i)
+            for i in 1:horizon_count
+        ] for t in initial_times
+    )
+    forecast = IS.Deterministic(; data = data, name = name, resolution = resolution)
+    IS.add_time_series!(sys, component, forecast)
+    window_size = Base.summarysize(data[initial_time])
+
+    # Budget smaller than one window: the cache must still hold one window.
+    cache = IS.ForecastCache(
+        IS.Deterministic,
+        component,
+        name;
+        cache_size_bytes = window_size ÷ 2,
+    )
+    @test cache.in_memory_count == 1
+    for it in initial_times
+        ta = IS.get_time_series_array!(cache, it)
+        @test TimeSeries.values(ta) ==
+              IS.get_time_series_values(component, forecast; start_time = it)
+    end
+
+    # Budget of two windows.
+    cache = IS.ForecastCache(
+        IS.Deterministic,
+        component,
+        name;
+        cache_size_bytes = 2 * window_size,
+    )
+    @test cache.in_memory_count == 2
+    for (i, ta) in enumerate(cache)
+        @test TimeSeries.values(ta) ==
+              IS.get_time_series_values(component, forecast; start_time = initial_times[i])
     end
 end

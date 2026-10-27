@@ -291,6 +291,10 @@ function ForecastCache(
     end
 
     window_size = row_size * horizon_count
+    if window_size > cache_size_bytes
+        @warn "Increasing cache size to $window_size in order to accommodate" window_size
+        cache_size_bytes = window_size
+    end
     in_memory_count = minimum((cache_size_bytes ÷ window_size, count))
     @debug "ForecastCache" _group = LOG_GROUP_TIME_SERIES row_size window_size in_memory_count
 
